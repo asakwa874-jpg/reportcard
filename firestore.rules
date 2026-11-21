@@ -1,0 +1,90 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() { return request.auth != null; }
+    function root() { return /databases/$(database)/documents; }
+
+    // The admin (you). Create the document admins/<your-uid> by hand in the Firebase console.
+    function isAdmin() { return signedIn() && exists(root() + "/admins/" + request.auth.uid); }
+
+    function school(sid) { return get(root() + "/schools/" + sid).data; }
+    // A school works only while it is switched on and its yearly subscription has not expired.
+    function schoolLive(sid) { return school(sid).active == true && school(sid).expiry > request.time; }
+
+    function isPrincipal(sid) {
+      return signedIn() && exists(root() + "/schools/" + sid + "/principals/" + request.auth.uid);
+    }
+    // A class teacher is valid only while the class code they joined with is still switched on.
+    function isTeacher(sid, cid) {
+      return signedIn()
+        && exists(root() + "/schools/" + sid + "/classes/" + cid + "/teachers/" + request.auth.uid)
+        && get(root() + "/classCodes/" + get(root() + "/schools/" + sid + "/classes/" + cid + "/teachers/" + request.auth.uid).data.code).data.active == true;
+    }
+
+    match /admins/{uid} {
+      allow get: if signedIn() && request.auth.uid == uid;
+    }
+
+    // Which school a signed-in principal belongs to.
+    match /users/{uid} {
+      allow get: if signedIn() && request.auth.uid == uid;
+      allow create: if signedIn() && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(['schoolId']);
+    }
+
+    // Activation codes. A code can be read only by someone who already knows it (no listing).
+    match /schoolCodes/{code} {
+      allow get: if signedIn();
+      allow write: if isAdmin();
+    }
+    match /classCodes/{code} {
+      allow get: if signedIn();
+      allow create: if isPrincipal(request.resource.data.schoolId);
+      allow update: if isPrincipal(resource.data.schoolId)
+        && request.resource.data.schoolId == resource.data.schoolId;
+      allow delete: if isPrincipal(resource.data.schoolId);
+    }
+
+    match /schools/{sid} {
+      // The admin manages schools only; the admin has NO access to classes, pupils or marks below.
+      allow read: if isAdmin() || isPrincipal(sid);
+      allow create, update, delete: if isAdmin();
+      allow update: if isPrincipal(sid)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['principalWhatsApp', 'year', 'stamp', 'signature']);
+
+      match /principals/{uid} {
+        allow get: if signedIn() && request.auth.uid == uid;
+        allow create: if signedIn() && request.auth.uid == uid
+          && get(root() + "/schoolCodes/" + request.resource.data.code).data.schoolId == sid
+          && get(root() + "/schoolCodes/" + request.resource.data.code).data.active == true;
+      }
+
+      match /classes/{cid} {
+        allow read: if schoolLive(sid) && (isPrincipal(sid) || isTeacher(sid, cid));
+        allow create, update, delete: if schoolLive(sid) && isPrincipal(sid);
+
+        match /teachers/{uid} {
+          allow create, update: if signedIn() && request.auth.uid == uid
+            && get(root() + "/classCodes/" + request.resource.data.code).data.schoolId == sid
+            && get(root() + "/classCodes/" + request.resource.data.code).data.classId == cid
+            && get(root() + "/classCodes/" + request.resource.data.code).data.active == true
+            && schoolLive(sid);
+          allow get: if signedIn() && request.auth.uid == uid;
+          allow read, delete: if isPrincipal(sid);
+        }
+
+        match /pupils/{pid} {
+          allow read, write: if schoolLive(sid) && (isPrincipal(sid) || isTeacher(sid, cid));
+        }
+        match /marks/{pid} {
+          allow read, write: if schoolLive(sid) && (isPrincipal(sid) || isTeacher(sid, cid));
+        }
+        // School fees: the principal only (class teachers cannot see who paid).
+        match /fees/{pid} {
+          allow read, write: if schoolLive(sid) && isPrincipal(sid);
+        }
+      }
+    }
+  }
+}
