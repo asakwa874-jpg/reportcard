@@ -236,3 +236,23 @@ export function bestOfSchool(classes) {
   const top = all[0].avg;
   return { winners: all.filter((x) => x.avg === top), top: all.slice(0, 5) };
 }
+
+// Reads "32/40", "16 / 20", "14,5" from text. total is null when only one number is found.
+export function extractFraction(text) {
+  const t = String(text || "").replace(/\s+/g, " ");
+  const f = t.match(/(?<!\d)(\d{1,3}(?:[.,]\d{1,2})?)\s*\/\s*(\d{1,3})(?!\d)/);
+  if (f) {
+    const value = Number(f[1].replace(",", "."));
+    const total = Number(f[2]);
+    if (total > 0 && value >= 0 && value <= total) return { value, total };
+  }
+  const n = t.match(/(?<!\d)\d{1,3}(?:[.,]\d{1,2})?(?!\d)/);
+  return n ? { value: Number(n[0].replace(",", ".")), total: null } : null;
+}
+
+// Script mark out of its own total -> mark out of the evaluation's maximum. 32/40 on an evaluation of 20 -> 16.
+export function convertMark(value, total, max) {
+  if (value == null || Number.isNaN(value)) return null;
+  const v = total ? (value / total) * max : value;
+  return Math.round(v * 100) / 100;
+}

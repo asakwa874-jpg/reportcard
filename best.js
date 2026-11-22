@@ -1,11 +1,14 @@
 // Best pupils: per subject and overall in a class, and the best in the whole school.
 import { el, select } from "./ui.js";
 import { computeTerm, bestOfClass, bestOfSchool } from "./calc.js";
+import { computeCompTerm } from "./comp.js";
 
 const fmt = (n) => (n == null ? "–" : String(Number(n.toFixed(2))));
 const nameList = (names) => (names.length ? names.join(", ") : "–");
 
-function classResult(S, pupils, marks, subjects, term) {
+function classResult(S, pupils, marks, cls, term) {
+  if (cls.mode === "comp") return bestOfClass(computeCompTerm({ pupils, marksByPupil: marks, comps: cls.comps || [], term }));
+  const subjects = cls.subjects || [];
   return bestOfClass(computeTerm({ pupils, marksByPupil: marks, subjects, term, seqs: [1, 2] }));
 }
 
@@ -22,7 +25,7 @@ function classBlock(title, b) {
 // Inside one class (teacher or principal).
 export function bestClassTab(box, { S, put, termOptions, TERM_NAMES }) {
   const draw = () => {
-    const b = classResult(S, S.pupils, S.marks, S.cls.subjects || [], S.term);
+    const b = classResult(S, S.pupils, S.marks, S.cls, S.term);
     put(box,
       el("div", { class: "card noprint" }, el("div", { class: "row" }, select(termOptions, S.term, (v) => { S.term = +v; draw(); }),
         el("button", { class: "btn alt", onclick: () => window.print() }, "Print")),
@@ -39,7 +42,7 @@ export async function bestSchoolTab(box, { S, put, termOptions, TERM_NAMES, load
   const draw = () => {
     const per = S.classes.map((c) => {
       const d = S.cache[c.id] || { pupils: [], marks: {} };
-      return { name: c.name, best: classResult(S, d.pupils, d.marks, c.subjects || [], S.term) };
+      return { name: c.name, best: classResult(S, d.pupils, d.marks, c, S.term) };
     });
     const sch = bestOfSchool(per);
     put(box,

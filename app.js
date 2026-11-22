@@ -15,6 +15,9 @@ import { smartScanTab, stopScan, qrPayload } from "./scan.js";
 import { renderCard, CARD_CSS, TERM_NAMES, TERM_NAMES_FR } from "./cards.js";
 import { feesTab } from "./fees.js";
 import { bestClassTab, bestSchoolTab } from "./best.js";
+import { parseCompetences, compsToText, LEVEL1_PRESET, computeCompTerm, compTermCompletion } from "./comp.js";
+import { compSheetTab, compCardsTab } from "./compui.js";
+import { compScanTab, stopCompScan } from "./compscan.js";
 
 const root = document.getElementById("app");
 const mount = (...nodes) => root.replaceChildren(...nodes.flat(Infinity).filter((x) => x != null && x !== false));
@@ -141,7 +144,7 @@ function showTeacherCode(msg) {
     }
   };
   mount(
-    topBar("Class teacher", "Enter your class code", el("button", { onclick: showHome }, "Back")),
+    topBar("Class teacher", "Enter your class code", el("button", { onclick: () => showHome() }, "Back")),
     el("div", { class: "wrap" }, msg ? el("p", { class: "note" }, msg) : null,
       el("div", { class: "card" }, field("Class code", inp), el("div", { class: "row" }, btn))),
     footer()
@@ -167,12 +170,12 @@ function showStaffLogin(msg) {
     try { await sendPasswordResetEmail(auth, email.value.trim()); toast("Password reset email sent."); } catch (e) { toast("Could not send the email."); }
   };
   mount(
-    topBar("Principal / Admin", null, el("button", { onclick: showHome }, "Back")),
+    topBar("Principal / Admin", null, el("button", { onclick: () => showHome() }, "Back")),
     el("div", { class: "wrap" }, msg ? el("p", { class: "note" }, msg) : null,
       el("div", { class: "card" }, field("Email", email), field("Password", pass), el("div", { class: "row" }, btn, reset)),
       el("div", { class: "card" }, el("h3", {}, "New school?"),
         el("p", { class: "muted" }, "Register with the activation code you received."),
-        el("button", { class: "btn alt", onclick: showRegister }, "Register my school"))),
+        el("button", { class: "btn alt", onclick: () => showRegister() }, "Register my school"))),
     footer()
   );
 }
@@ -340,18 +343,25 @@ function principalClasses(box) {
   const name = el("input", { placeholder: "e.g. Class 2" });
   const section = select([{ value: "Anglophone", label: "Anglophone" }, { value: "Francophone", label: "Francophone" }], "Anglophone");
   const subj = el("textarea", {}, DEFAULT_SUBJECTS);
+  const modeSel = select([{ value: "std", label: "Standard (subjects, sequences)" }, { value: "comp", label: "Official competence booklet (monthly evaluations)" }], "std", (v) => {
+    subj.value = v === "comp" ? LEVEL1_PRESET : DEFAULT_SUBJECTS;
+    subjLabel.firstChild.textContent = v === "comp" ? "Competences (one per line: name | evaluation max, evaluation max)" : "Subjects (one per line, name:coefficient)";
+  });
+  const subjLabel = field("Subjects (one per line, name:coefficient)", subj);
   const add = el("button", { class: "btn" }, "Add class");
   add.onclick = async () => {
     if (!name.value.trim()) return toast("Type the class name.");
-    const subjects = parseSubjects(subj.value).map((s) => ({ ...s, id: randomCode(4) }));
-    if (!subjects.length) return toast("Add at least one subject.");
+    const isComp = modeSel.value === "comp";
+    const subjects = isComp ? [] : parseSubjects(subj.value).map((s) => ({ ...s, id: randomCode(4) }));
+    const comps = isComp ? parseCompetences(subj.value).map((c) => ({ ...c, id: randomCode(4) })) : [];
+    if (isComp ? !comps.length : !subjects.length) return toast(isComp ? "Add at least one competence, like: Mathematics | Oral 10, Written 15" : "Add at least one subject.");
     add.disabled = true;
     try {
       const code = await uniqueClassCode();
       const cref = doc(collection(db, "schools", S.sid, "classes"));
       const b = writeBatch(db);
       b.set(cref, {
-        name: name.value.trim(), section: section.value, subjects, code, codeActive: true,
+        name: name.value.trim(), section: section.value, subjects, mode: isComp ? "comp" : "std", comps, code, codeActive: true,
         schoolName: S.school.name, principalWhatsApp: S.school.principalWhatsApp || "", year: S.school.year || defaultYear(),
         stamp: S.school.stamp || "", signature: S.school.signature || "",
         createdAt: serverTimestamp(),
@@ -376,6 +386,17 @@ function principalClasses(box) {
       if (!next.length) throw new Error("Add at least one subject.");
       await updateDoc(doc(db, "schools", S.sid, "classes", c.id), { subjects: next });
     });
+    const compBox = el("textarea", {}, compsToText(c.comps));
+    const compSave = el("button", { class: "btn alt sm" }, "Save competences");
+    compSave.onclick = () => act(async () => {
+      const old = c.comps || [];
+      const next = parseCompetences(compBox.value).map((x) => {
+        const hit = old.find((o) => o.name.toLowerCase() === x.name.toLowerCase());
+        return { ...x, id: hit ? hit.id : randomCode(4) };
+      });
+      if (!next.length) throw new Error("Add at least one competence.");
+      await updateDoc(doc(db, "schools", S.sid, "classes", c.id), { comps: next });
+    });
     return el("div", { class: "card" },
       el("h3", {}, c.name, " ", el("span", { class: "pill" }, c.section || ""), " ", el("span", { class: `pill ${c.codeActive ? "ok" : "bad"}` }, c.codeActive ? "Teacher code on" : "Teacher code off")),
       el("p", {}, "Class code: ", el("span", { class: "code" }, c.code)),
@@ -396,13 +417,16 @@ function principalClasses(box) {
           b.update(doc(db, "schools", S.sid, "classes", c.id), { code, codeActive: true });
           await b.commit();
         }) }, "New code")),
-      el("details", {}, el("summary", { class: "muted" }, `Subjects and coefficients (${(c.subjects || []).length})`), subjBox, el("div", { class: "row" }, subjSave)));
+      c.mode === "comp"
+        ? el("details", {}, el("summary", { class: "muted" }, `Competences and evaluations (${(c.comps || []).length})`), compBox,
+            el("p", { class: "muted" }, "One per line: name | evaluation max, evaluation max. Keep a competence's name to keep its marks."), el("div", { class: "row" }, compSave))
+        : el("details", {}, el("summary", { class: "muted" }, `Subjects and coefficients (${(c.subjects || []).length})`), subjBox, el("div", { class: "row" }, subjSave)));
   });
 
   put(box, 
     el("div", { class: "card" }, el("h3", {}, "Add a class"),
-      field("Class name", name), field("Section", section),
-      field("Subjects (one per line, name:coefficient)", subj), el("div", { class: "row" }, add)),
+      field("Class name", name), field("Section", section), field("Report card format", modeSel),
+      subjLabel, el("div", { class: "row" }, add)),
     cards.length ? cards : el("p", { class: "muted" }, "No classes yet. Add your first class above, then give its code to the class teacher.")
   );
 }
@@ -447,6 +471,7 @@ async function principalProgress(box) {
   const draw = () => {
     const rows = S.classes.map((c) => {
       const d = S.cache[c.id];
+      if (c.mode === "comp") return { c, ...compTermCompletion({ pupils: d.pupils, marksByPupil: d.marks, comps: c.comps || [], term: S.term }) };
       return { c, ...completion({ pupils: d.pupils, marksByPupil: d.marks, subjects: c.subjects || [], term: S.term, seq: S.seq }) };
     });
     const done = rows.filter((r) => r.status === "done").length;
@@ -473,7 +498,9 @@ async function principalWeak(box) {
   const draw = () => {
     const parts = S.classes.map((c) => {
       const d = S.cache[c.id];
-      const res = computeTerm({ pupils: d.pupils, marksByPupil: d.marks, subjects: c.subjects || [], term: S.term });
+      const res = c.mode === "comp"
+        ? computeCompTerm({ pupils: d.pupils, marksByPupil: d.marks, comps: c.comps || [], term: S.term })
+        : computeTerm({ pupils: d.pupils, marksByPupil: d.marks, subjects: c.subjects || [], term: S.term });
       const w = weakest(res.subjectAvgs, 3);
       return el("div", { class: "card" },
         el("h3", {}, c.name),
@@ -569,17 +596,22 @@ const classRef = (...p) => doc(db, "schools", S.sid, "classes", S.cid, ...p);
 
 function showClass(tab = "marks") {
   stopScan();
+  stopCompScan();
+  const isComp = S.cls.mode === "comp";
   const content = el("div", { class: "wrap" });
   const back = S.fromPrincipal
     ? el("button", { onclick: () => showPrincipal("classes") }, "Back")
     : logoutBtn();
   mount(
     topBar(S.cls.name, `${S.cls.schoolName || ""} · ${S.cls.year || ""}`, back),
-    tabBar([["marks", "Broadsheet"], ["scan", "Smart scan"], ["cards", "Report cards"], ["best", "Best pupils"], ["pupils", "Pupils"]], tab, (k) => showClass(k)),
+    tabBar(isComp
+      ? [["marks", "Marks"], ["scan", "Smart scan"], ["cards", "Report cards"], ["best", "Best pupils"], ["pupils", "Pupils"]]
+      : [["marks", "Broadsheet"], ["scan", "Smart scan"], ["cards", "Report cards"], ["best", "Best pupils"], ["pupils", "Pupils"]], tab, (k) => showClass(k)),
     content,
     footer()
   );
-  ({ marks: broadsheetTab, scan: scanTab, cards: cardsTab, best: (b) => bestClassTab(b, { S, put, termOptions, TERM_NAMES }), pupils: pupilsTab })[tab](content);
+  const cctx = { S, saveMark, put, termOptions, TERM_NAMES, business, download };
+  ({ marks: isComp ? (b) => compSheetTab(b, cctx) : broadsheetTab, scan: isComp ? (b) => compScanTab(b, cctx) : scanTab, cards: isComp ? (b) => compCardsTab(b, cctx) : cardsTab, best: (b) => bestClassTab(b, { S, put, termOptions, TERM_NAMES }), pupils: pupilsTab })[tab](content);
 }
 
 async function saveMark(pid, key, val) {

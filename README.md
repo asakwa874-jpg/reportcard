@@ -4,6 +4,15 @@ A website that works on phones. Teachers enter marks, the system works out avera
 
 No build step. It is plain files: upload them to GitHub, deploy on Vercel, done.
 
+## Official competence booklet (Level I)
+
+When adding a class, choose **Official competence booklet**. The Level I Class One preset is filled in: each line is `Competence | Oral 20, Written 15, Attitude 5`. Edit it for other classes.
+
+- Teachers type every evaluation mark per month (Month 1 to 8) on the Marks tab. Term 1 = months 1-3, Term 2 = months 4-6, Term 3 = months 7-8.
+- Term mark of an evaluation = average of the months entered. Competence total = sum of its evaluations. Term total, average /20, position and appreciation (A+, A, B, C) follow automatically. Annual average = mean of the terms entered.
+- Report cards print one full A4 page per pupil, with stamp and signatures. English or French.
+- Best pupils, Weak subjects and Progress work for these classes too. Smart scan is for the standard format only.
+
 ## Who sees what
 
 | Person | How they get in | What they can do |
