@@ -7,6 +7,15 @@ import { extractFraction, convertMark } from "./calc.js";
 import { stopScan } from "./scan.js";
 
 const FRAME = { x: 0.15, y: 0.35, w: 0.7, h: 0.3 };
+// The picture is shown cropped (object-fit: cover). Work out the same framed area in the real video picture.
+function frameFor(video) {
+  const vw = video.videoWidth, vh = video.videoHeight, cw = video.clientWidth, ch = video.clientHeight;
+  if (!vw || !vh || !cw || !ch) return FRAME;
+  const scale = Math.max(cw / vw, ch / vh);
+  const visW = cw / scale, visH = ch / scale;
+  const ox = (vw - visW) / 2, oy = (vh - visH) / 2;
+  return { x: (ox + FRAME.x * visW) / vw, y: (oy + FRAME.y * visH) / vh, w: (FRAME.w * visW) / vw, h: (FRAME.h * visH) / vh };
+}
 let stream = null;
 const stopCam = () => { if (stream) { stream.getTracks().forEach((t) => t.stop()); stream = null; } };
 
@@ -87,7 +96,7 @@ export function compScanTab(box, { S, saveMark, put, termOptions, TERM_NAMES }) 
     if (!stream) return toast("Start the camera first.");
     readBtn.disabled = true;
     try {
-      const r = await readMarkFromCanvas(cropToCanvas(video, FRAME), (m) => (status.textContent = m));
+      const r = await readMarkFromCanvas(cropToCanvas(video, frameFor(video)), (m) => (status.textContent = m));
       const f = extractFraction(r.text);
       if (!f) status.textContent = "Could not read a mark. Move closer, keep it steady, or type the mark.";
       else {
@@ -119,10 +128,12 @@ export function compScanTab(box, { S, saveMark, put, termOptions, TERM_NAMES }) 
   const picker = el("div", { class: "card" },
     el("div", { class: "row" }, select(termOptions, S.term, (v) => { S.term = +v; S.snapMonth = TERM_MONTHS[S.term][0]; compScanTab(box, { S, saveMark, put, termOptions, TERM_NAMES }); }), monthSel),
     el("div", { class: "row" }, compSel, partSel));
-  put(box, picker,
-    el("div", { class: "card" }, camWrap, el("div", { class: "row" }, startBtn, stopBtn), status),
-    el("div", { class: "card" }, who, el("label", { class: "f" }, "Pupil"), pupilSel, el("label", { class: "f" }, "Mark on the script"), raw, el("label", { class: "f" }, "Script is out of"), tot, conv,
-      el("div", { class: "row" }, readBtn, saveBtn)));
+  // Camera, mark boxes and buttons stay together at the top of the screen while the page scrolls.
+  put(box,
+    el("div", { class: "card stickycam" }, camWrap, el("div", { class: "row" }, startBtn, stopBtn), status, who,
+      el("div", { class: "row" }, raw, tot), conv, el("div", { class: "row" }, readBtn, saveBtn)),
+    picker,
+    el("div", { class: "card" }, el("label", { class: "f" }, "Pupil"), pupilSel));
   refresh();
 }
 export { stopCam as stopCompScan };

@@ -51,6 +51,10 @@ table.grid td.n{white-space:nowrap}
 input[type=checkbox]{width:auto}
 .camwrap{position:relative;border-radius:12px;overflow:hidden;background:#000;margin-bottom:8px}
 .cam{width:100%;display:block}
+.stickycam{position:sticky;top:0;z-index:6;box-shadow:0 6px 14px rgba(0,0,0,.18)}
+.stickycam .cam{height:34vh;object-fit:cover}
+.stickycam .row{margin:6px 0}
+.stickycam p{margin:4px 0}
 .camframe{position:absolute;left:15%;top:35%;width:70%;height:30%;border:3px solid #fff;border-radius:10px;box-shadow:0 0 0 999px rgba(0,0,0,.35)}
 td.flag{background:#fff1da}
 td.flag input{border-color:#f3a93b}

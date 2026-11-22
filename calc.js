@@ -246,8 +246,10 @@ export function extractFraction(text) {
     const total = Number(f[2]);
     if (total > 0 && value >= 0 && value <= total) return { value, total };
   }
-  const n = t.match(/(?<!\d)\d{1,3}(?:[.,]\d{1,2})?(?!\d)/);
-  return n ? { value: Number(n[0].replace(",", ".")), total: null } : null;
+  // Fraction written one above the other (no slash): the OCR reads "12 20" or "12\n20".
+  const nums = [...t.matchAll(/(?<!\d)\d{1,3}(?:[.,]\d{1,2})?(?!\d)/g)].map((m) => Number(m[0].replace(",", ".")));
+  if (nums.length >= 2 && nums[1] > 0 && nums[0] <= nums[1] && nums[1] >= 5) return { value: nums[0], total: nums[1] };
+  return nums.length ? { value: nums[0], total: null } : null;
 }
 
 // Script mark out of its own total -> mark out of the evaluation's maximum. 32/40 on an evaluation of 20 -> 16.
