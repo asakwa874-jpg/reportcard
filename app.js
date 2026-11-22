@@ -610,7 +610,7 @@ function showClass(tab = "marks") {
     content,
     footer()
   );
-  const cctx = { S, saveMark, put, termOptions, TERM_NAMES, business, download };
+  const cctx = { S, saveMark, put, termOptions, TERM_NAMES, business, download, getToken: () => auth.currentUser.getIdToken() };
   ({ marks: isComp ? (b) => compSheetTab(b, cctx) : broadsheetTab, scan: isComp ? (b) => compScanTab(b, cctx) : scanTab, cards: isComp ? (b) => compCardsTab(b, cctx) : cardsTab, best: (b) => bestClassTab(b, { S, put, termOptions, TERM_NAMES }), pupils: pupilsTab })[tab](content);
 }
 

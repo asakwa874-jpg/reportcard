@@ -19,7 +19,26 @@ function frameFor(video) {
 let stream = null;
 const stopCam = () => { if (stream) { stream.getTracks().forEach((t) => t.stop()); stream = null; } };
 
-export function compScanTab(box, { S, saveMark, put, termOptions, TERM_NAMES }) {
+// Smart reader on the server (api/read-mark.js). Returns {value,total} or null; throws when the reader is not available.
+let serverOff = false;
+async function readOnServer(video, getToken) {
+  const f = frameFor(video);
+  const vw = video.videoWidth, vh = video.videoHeight;
+  const sw = vw * f.w, sh = vh * f.h;
+  const k = Math.min(1, 640 / sw);
+  const c = document.createElement("canvas");
+  c.width = Math.max(1, Math.round(sw * k)); c.height = Math.max(1, Math.round(sh * k));
+  c.getContext("2d").drawImage(video, vw * f.x, vh * f.y, sw, sh, 0, 0, c.width, c.height);
+  const image = c.toDataURL("image/jpeg", 0.85).split(",")[1];
+  const token = await getToken();
+  const r = await fetch("/api/read-mark", { method: "POST", headers: { "content-type": "application/json", authorization: "Bearer " + token }, body: JSON.stringify({ image, mime: "image/jpeg" }) });
+  if (r.status === 404 || r.status === 503) { serverOff = true; throw new Error("reader off"); }
+  if (!r.ok) throw new Error("reader error");
+  return r.json();
+}
+
+export function compScanTab(box, ctx) {
+  const { S, saveMark, put, termOptions, getToken } = ctx;
   const comps = S.cls.comps || [];
   if (!S.pupils.length) return put(box, el("div", { class: "card" }, el("p", {}, "Add your pupils first (Pupils tab).")));
   if (!comps.length) return put(box, el("div", { class: "card" }, el("p", {}, "This class has no competences yet.")));
@@ -43,7 +62,7 @@ export function compScanTab(box, { S, saveMark, put, termOptions, TERM_NAMES }) 
 
   const pupilSel = select(S.pupils.map((p) => ({ value: p.id, label: p.name })), S.snapPupil, (v) => { S.snapPupil = v; refresh(); });
   const monthSel = select(TERM_MONTHS[S.term].map((m) => ({ value: m, label: `Month ${m}` })), S.snapMonth, (v) => { S.snapMonth = +v; refresh(); });
-  const compSel = select(comps.map((c, i) => ({ value: i, label: c.name })), S.snapComp, (v) => { S.snapComp = +v; S.snapPart = 0; compScanTab(box, { S, saveMark, put, termOptions, TERM_NAMES }); });
+  const compSel = select(comps.map((c, i) => ({ value: i, label: c.name })), S.snapComp, (v) => { S.snapComp = +v; S.snapPart = 0; compScanTab(box, ctx); });
   const partSel = select(cur().parts.map((p, i) => ({ value: i, label: `${p.name} (/${p.max})` })), S.snapPart, (v) => { S.snapPart = +v; refresh(); });
   const startBtn = el("button", { class: "btn" }, "Start camera");
   const stopBtn = el("button", { class: "btn alt" }, "Stop camera");
@@ -96,14 +115,23 @@ export function compScanTab(box, { S, saveMark, put, termOptions, TERM_NAMES }) 
     if (!stream) return toast("Start the camera first.");
     readBtn.disabled = true;
     try {
-      const r = await readMarkFromCanvas(cropToCanvas(video, frameFor(video)), (m) => (status.textContent = m));
-      const f = extractFraction(r.text);
+      let f = null;
+      let smart = false;
+      if (getToken && !serverOff) {
+        status.textContent = "Reading…";
+        try { const j = await readOnServer(video, getToken); smart = true; f = j && j.value != null ? { value: j.value, total: j.total, sure: j.sure } : null; }
+        catch (e) { /* reader not set up or no connection: use the reader inside the phone */ }
+      }
+      if (!smart) {
+        const r = await readMarkFromCanvas(cropToCanvas(video, frameFor(video)), (m) => (status.textContent = m));
+        f = extractFraction(r.text);
+      }
       if (!f) status.textContent = "Could not read a mark. Move closer, keep it steady, or type the mark.";
       else {
         raw.value = String(f.value);
         tot.value = f.total ? String(f.total) : String(part().max);
         showConv();
-        status.textContent = `Read ${f.value}${f.total ? "/" + f.total : ""}. Check it against the script, then tap Save.`;
+        status.textContent = `${smart ? "Smart reader" : "Read"}: ${f.value}${f.total ? "/" + f.total : ""}${f.sure === false ? " (not sure)" : ""}. Check it against the script, then tap Save.`;
       }
     } catch (e) { status.textContent = e.message || "Could not read the mark. Type it in."; }
     readBtn.disabled = false;
@@ -117,16 +145,17 @@ export function compScanTab(box, { S, saveMark, put, termOptions, TERM_NAMES }) 
     try {
       await saveMark(p.id, key(), r.empty ? null : r.value);
       const next = S.pupils[S.pupils.findIndex((x) => x.id === p.id) + 1];
-      toast(next ? `Saved for ${p.name}. Next: ${next.name}` : `Saved for ${p.name}. That was the last pupil.`);
+      const shown = r.empty ? "mark removed" : `${r.value}/${part().max}`;
+      toast(next ? `Saved ${shown} for ${p.name}. Next: ${next.name}` : `Saved ${shown} for ${p.name}. That was the last pupil.`, 5000);
       if (next) S.snapPupil = next.id;
       refresh();
-      status.textContent = "Frame the next script's mark, or pick the pupil below.";
+      status.textContent = `Last saved: ${p.name} ${shown}. Frame the next script's mark, or pick the pupil below.`;
     } catch (e) { toast("Not saved: " + e.message); }
     saveBtn.disabled = false;
   };
 
   const picker = el("div", { class: "card" },
-    el("div", { class: "row" }, select(termOptions, S.term, (v) => { S.term = +v; S.snapMonth = TERM_MONTHS[S.term][0]; compScanTab(box, { S, saveMark, put, termOptions, TERM_NAMES }); }), monthSel),
+    el("div", { class: "row" }, select(termOptions, S.term, (v) => { S.term = +v; S.snapMonth = TERM_MONTHS[S.term][0]; compScanTab(box, ctx); }), monthSel),
     el("div", { class: "row" }, compSel, partSel));
   // Camera, mark boxes and buttons stay together at the top of the screen while the page scrolls.
   put(box,
