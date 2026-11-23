@@ -32,8 +32,12 @@ async function readOnServer(video, getToken) {
   const image = c.toDataURL("image/jpeg", 0.85).split(",")[1];
   const token = await getToken();
   const r = await fetch("/api/read-mark", { method: "POST", headers: { "content-type": "application/json", authorization: "Bearer " + token }, body: JSON.stringify({ image, mime: "image/jpeg" }) });
-  if (r.status === 404 || r.status === 503) { serverOff = true; throw new Error("reader off"); }
-  if (!r.ok) throw new Error("reader error");
+  if (r.status === 404 || r.status === 503) { serverOff = true; throw new Error("reader off (" + r.status + ")"); }
+  if (!r.ok) {
+    let d = "";
+    try { const j = await r.json(); d = (j.error || "") + (j.detail ? ": " + j.detail : ""); } catch (e) { /* no details */ }
+    throw new Error("reader error " + r.status + (d ? " (" + d + ")" : ""));
+  }
   return r.json();
 }
 
@@ -117,10 +121,11 @@ export function compScanTab(box, ctx) {
     try {
       let f = null;
       let smart = false;
+      let why = serverOff ? "smart reader is switched off" : "";
       if (getToken && !serverOff) {
         status.textContent = "Reading…";
         try { const j = await readOnServer(video, getToken); smart = true; f = j && j.value != null ? { value: j.value, total: j.total, sure: j.sure } : null; }
-        catch (e) { /* reader not set up or no connection: use the reader inside the phone */ }
+        catch (e) { why = e.message || "reader not available"; }
       }
       if (!smart) {
         const r = await readMarkFromCanvas(cropToCanvas(video, frameFor(video)), (m) => (status.textContent = m));
@@ -131,7 +136,7 @@ export function compScanTab(box, ctx) {
         raw.value = String(f.value);
         tot.value = f.total ? String(f.total) : String(part().max);
         showConv();
-        status.textContent = `${smart ? "Smart reader" : "Read"}: ${f.value}${f.total ? "/" + f.total : ""}${f.sure === false ? " (not sure)" : ""}. Check it against the script, then tap Save.`;
+        status.textContent = `${smart ? "Smart reader" : "Read"}${!smart && why ? " [" + why + "]" : ""}: ${f.value}${f.total ? "/" + f.total : ""}${f.sure === false ? " (not sure)" : ""}. Check it against the script, then tap Save.`;
       }
     } catch (e) { status.textContent = e.message || "Could not read the mark. Type it in."; }
     readBtn.disabled = false;
