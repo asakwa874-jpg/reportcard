@@ -18,6 +18,7 @@ import { bestClassTab, bestSchoolTab } from "./best.js";
 import { parseCompetences, compsToText, LEVEL1_PRESET, computeCompTerm, compTermCompletion } from "./comp.js";
 import { compSheetTab, compCardsTab } from "./compui.js";
 import { compScanTab, stopCompScan } from "./compscan.js";
+import { compFillTab } from "./compfill.js";
 
 const root = document.getElementById("app");
 const mount = (...nodes) => root.replaceChildren(...nodes.flat(Infinity).filter((x) => x != null && x !== false));
@@ -445,7 +446,7 @@ async function openClass(c) {
   S.cls = c;
   S.fromPrincipal = true;
   await loadClassData();
-  showClass("marks");
+  showClass(S.cls && S.cls.mode === "comp" ? "fill" : "marks");
 }
 
 async function loadSchoolData(force) {
@@ -578,7 +579,7 @@ async function bootTeacher() {
     S.cls = { id: cs.id, ...cs.data() };
     S.fromPrincipal = false;
     await loadClassData();
-    showClass("marks");
+    showClass(S.cls && S.cls.mode === "comp" ? "fill" : "marks");
   } catch (e) {
     localStorage.removeItem("rc_class");
     showTeacherCode("Your access has ended or the code was changed. Enter the current class code from your principal.");
@@ -605,13 +606,13 @@ function showClass(tab = "marks") {
   mount(
     topBar(S.cls.name, `${S.cls.schoolName || ""} · ${S.cls.year || ""}`, back),
     tabBar(isComp
-      ? [["marks", "Marks"], ["scan", "Smart scan"], ["cards", "Report cards"], ["best", "Best pupils"], ["pupils", "Pupils"]]
+      ? [["fill", "Fill class"], ["marks", "Marks"], ["scan", "Smart scan"], ["cards", "Report cards"], ["best", "Best pupils"], ["pupils", "Pupils"]]
       : [["marks", "Broadsheet"], ["scan", "Smart scan"], ["cards", "Report cards"], ["best", "Best pupils"], ["pupils", "Pupils"]], tab, (k) => showClass(k)),
     content,
     footer()
   );
-  const cctx = { S, saveMark, put, termOptions, TERM_NAMES, business, download, getToken: () => auth.currentUser.getIdToken() };
-  ({ marks: isComp ? (b) => compSheetTab(b, cctx) : broadsheetTab, scan: isComp ? (b) => compScanTab(b, cctx) : scanTab, cards: isComp ? (b) => compCardsTab(b, cctx) : cardsTab, best: (b) => bestClassTab(b, { S, put, termOptions, TERM_NAMES }), pupils: pupilsTab })[tab](content);
+  const cctx = { goCards: () => showClass("cards"), S, saveMark, put, termOptions, TERM_NAMES, business, download, getToken: () => auth.currentUser.getIdToken() };
+  ({ fill: isComp ? (b) => compFillTab(b, cctx) : broadsheetTab, marks: isComp ? (b) => compSheetTab(b, cctx) : broadsheetTab, scan: isComp ? (b) => compScanTab(b, cctx) : scanTab, cards: isComp ? (b) => compCardsTab(b, cctx) : cardsTab, best: (b) => bestClassTab(b, { S, put, termOptions, TERM_NAMES }), pupils: pupilsTab })[tab](content);
 }
 
 async function saveMark(pid, key, val) {
