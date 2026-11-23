@@ -2,6 +2,7 @@
 import { el, select, toast, imageToDataUrl } from "./ui.js";
 import { SCALE, autoRemark } from "./calc.js";
 import { TERM_MONTHS, compKey, computeCompTerm, computeCompYear } from "./comp.js";
+import { renderBookPage, BOOK_CSS } from "./compbook.js";
 
 const fmt = (n) => (n == null ? "" : String(Number(n.toFixed(2))));
 const okImg = (u) => typeof u === "string" && /^data:image\/(png|jpeg);base64,[A-Za-z0-9+/=]+$/.test(u) && u.length < 400000;
@@ -63,7 +64,7 @@ export function compSheetTab(box, { S, saveMark, put, termOptions, TERM_NAMES })
 
 /* ---------- full-page card ---------- */
 export const COMP_CSS = `
-.cards-area .cc{zoom:var(--fit,1)}
+.cards-area .cc,.cards-area .bk{zoom:var(--fit,1)}
 .cc{box-sizing:border-box;width:190mm;min-height:270mm;margin:0 auto 12px;padding:8mm;background:#fff;color:#000;border:1.5px solid #000;font-family:Arial,Helvetica,sans-serif;font-size:12px;page-break-after:always;break-after:page;position:relative}
 .cc *{box-sizing:border-box}
 .cc h1{margin:0;text-align:center;font-size:1.4em;text-transform:uppercase}
@@ -132,6 +133,7 @@ export function renderCompCard({ schoolName, className, year, term, row, yearRow
 export function compCardsTab(box, { S, put, termOptions, TERM_NAMES, business, download }) {
   const comps = S.cls.comps || [];
   let only = "all";
+  let pages = "both"; // both | book | sum
   let fit = true; // show the whole page shrunk to the screen width (print is always full size)
   const prefs = (() => { try { return JSON.parse(localStorage.getItem("rc_cardprefs") || "{}"); } catch { return {}; } })();
   const draw = () => {
@@ -141,18 +143,20 @@ export function compCardsTab(box, { S, put, termOptions, TERM_NAMES, business, d
     const lang = prefs.lang === "en" || prefs.lang === "fr" ? prefs.lang : (S.cls.section === "Francophone" ? "fr" : "en");
     const teacherSign = localStorage.getItem("rc_tsign_" + S.cid) || "";
     const idx = res.rows.map((r, i) => i).filter((i) => only === "all" || res.rows[i].pupilId === only);
-    const area = el("div", { class: "cards-area" }, idx.map((i) => renderCompCard({
-      schoolName: S.cls.schoolName, className: S.cls.name, year: S.cls.year, term: S.term, row: res.rows[i], yearRow: year.rows[i], count: S.pupils.length,
-      lang, remark: prefs.remarks === false ? "" : autoRemark(res.rows[i], lang), stamp: S.cls.stamp, signature: S.cls.signature, teacherSign, business })));
+    const area = el("div", { class: "cards-area" }, idx.map((i) => [
+      pages !== "sum" ? renderBookPage({ schoolName: S.cls.schoolName, className: S.cls.name, year: S.cls.year, pupilName: res.rows[i].name, comps, marks: S.marks[res.rows[i].pupilId], business }) : null,
+      pages !== "book" ? renderCompCard({
+        schoolName: S.cls.schoolName, className: S.cls.name, year: S.cls.year, term: S.term, row: res.rows[i], yearRow: year.rows[i], count: S.pupils.length,
+        lang, remark: prefs.remarks === false ? "" : autoRemark(res.rows[i], lang), stamp: S.cls.stamp, signature: S.cls.signature, teacherSign, business }) : null]));
     const langSel = select([{ value: "auto", label: "Language: automatic (by section)" }, { value: "en", label: "Language: English" }, { value: "fr", label: "Langue : Français" }], prefs.lang || "auto", (v) => { prefs.lang = v === "auto" ? undefined : v; localStorage.setItem("rc_cardprefs", JSON.stringify(prefs)); draw(); });
     const fileName = () => `${S.cls.name}-${TERM_NAMES[S.term].toLowerCase().replace(/\s+/g, "-")}-report-cards.html`.replace(/\s+/g, "-");
-    const html = () => `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${S.cls.name} report cards</title><style>body{margin:0;padding:8px;background:#fff}${COMP_CSS}@page{size:A4;margin:8mm}</style></head><body>${area.innerHTML}<script>(function(){var f=function(){var z=Math.min(1,(innerWidth-16)/722);document.querySelectorAll(".cc").forEach(function(c){c.style.zoom=z})};f();addEventListener("resize",f);addEventListener("beforeprint",function(){document.querySelectorAll(".cc").forEach(function(c){c.style.zoom=1})});addEventListener("afterprint",f)})()<\/script></body></html>`;
+    const html = () => `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${S.cls.name} report cards</title><style>body{margin:0;padding:8px;background:#fff}${COMP_CSS}${BOOK_CSS}@page{size:A4;margin:8mm}</style></head><body>${area.innerHTML}<script>(function(){var f=function(){var z=Math.min(1,(innerWidth-16)/722);document.querySelectorAll(".cc,.bk").forEach(function(c){c.style.zoom=z})};f();addEventListener("resize",f);addEventListener("beforeprint",function(){document.querySelectorAll(".cc,.bk").forEach(function(c){c.style.zoom=1})});addEventListener("afterprint",f)})()<\/script></body></html>`;
     const signFile = el("input", { type: "file", accept: "image/*" });
     signFile.addEventListener("change", async () => {
       if (!signFile.files[0]) return;
       try { localStorage.setItem("rc_tsign_" + S.cid, await imageToDataUrl(signFile.files[0], 360)); toast("Your signature is saved on this phone."); draw(); } catch (e) { toast(e.message); }
     });
-    const st = el("style", {}, COMP_CSS + "@media print{@page{size:A4;margin:8mm}.cards-area .cc{zoom:1 !important}}");
+    const st = el("style", {}, COMP_CSS + BOOK_CSS + "@media print{@page{size:A4;margin:8mm}.cards-area .cc,.cards-area .bk{zoom:1 !important}}");
     const applyFit = () => {
       if (!area.isConnected) return window.removeEventListener("resize", applyFit);
       const full = 718 + 4; // 190 mm in CSS pixels
@@ -168,7 +172,7 @@ export function compCardsTab(box, { S, put, termOptions, TERM_NAMES, business, d
           select([{ value: "all", label: "All pupils" }, ...S.pupils.map((p) => ({ value: p.id, label: p.name }))], only, (v) => { only = v; draw(); })),
         el("div", { class: "row" }, el("button", { class: "btn", onclick: () => window.print() }, "Print / Save as PDF (one page per pupil)"),
           el("button", { class: "btn alt", onclick: () => download(fileName(), html()) }, "Save file"), fitBtn),
-        el("div", { class: "row" }, langSel),
+        el("div", { class: "row" }, langSel, select([{ value: "both", label: "Pages: booklet + summary" }, { value: "book", label: "Pages: booklet page only" }, { value: "sum", label: "Pages: summary only" }], pages, (v) => { pages = v; draw(); })),
         el("details", {}, el("summary", { class: "muted" }, teacherSign ? "Class teacher's signature (saved)" : "Add the class teacher's signature"), signFile),
         el("p", { class: "muted" }, `${res.ranked} of ${S.pupils.length} pupils have marks. Class average: ${res.classAvg ?? "–"}/20.`)),
       area);
