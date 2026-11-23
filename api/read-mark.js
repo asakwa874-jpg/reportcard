@@ -42,6 +42,15 @@ export function parseReply(text) {
   } catch { return null; }
 }
 
+// Short reason from the AI service (never contains the key).
+async function errText(r) {
+  try {
+    const j = await r.json();
+    const m = (j.error && (j.error.message || j.error.status)) || "";
+    return String(m).replace(/key=[^\s&]+/g, "key=…").slice(0, 150);
+  } catch { return ""; }
+}
+
 async function askGemini(b64, mime, fetchFn) {
   const model = process.env.GEMINI_MODEL || "gemini-2.5-flash";
   const r = await fetchFn(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
@@ -52,7 +61,7 @@ async function askGemini(b64, mime, fetchFn) {
       generationConfig: { responseMimeType: "application/json", temperature: 0 },
     }),
   });
-  if (!r.ok) throw new Error("gemini " + r.status);
+  if (!r.ok) throw new Error("gemini " + r.status + " " + (await errText(r)));
   const j = await r.json();
   return j.candidates?.[0]?.content?.parts?.map((p) => p.text).join("") || "";
 }
@@ -66,7 +75,7 @@ async function askClaude(b64, mime, fetchFn) {
       messages: [{ role: "user", content: [{ type: "image", source: { type: "base64", media_type: mime, data: b64 } }, { type: "text", text: PROMPT }] }],
     }),
   });
-  if (!r.ok) throw new Error("claude " + r.status);
+  if (!r.ok) throw new Error("claude " + r.status + " " + (await errText(r)));
   const j = await r.json();
   return (j.content || []).map((c) => c.text || "").join("");
 }
@@ -75,7 +84,7 @@ export async function handle(body, idToken, fetchFn = fetch) {
   const provider = process.env.READER || (process.env.GEMINI_API_KEY ? "gemini" : "claude");
   if (provider === "gemini" ? !process.env.GEMINI_API_KEY : !process.env.ANTHROPIC_API_KEY) return { status: 503, json: { error: "reader not set up" } };
   const uid = await whoIs(idToken, fetchFn);
-  if (!uid) return { status: 401, json: { error: "sign in first" } };
+  if (!uid) return { status: 401, json: { error: "sign in check failed" } };
   if (tooMany(uid)) return { status: 429, json: { error: "slow down" } };
   const b64 = body && body.image;
   const mime = body && body.mime === "image/png" ? "image/png" : "image/jpeg";
@@ -86,11 +95,17 @@ export async function handle(body, idToken, fetchFn = fetch) {
     if (!out) return { status: 200, json: { value: null, total: null, sure: false } };
     return { status: 200, json: out };
   } catch (e) {
-    return { status: 502, json: { error: "reader failed" } };
+    return { status: 502, json: { error: "reader failed", detail: String(e && e.message || e).slice(0, 220) } };
   }
 }
 
 export default async function handler(req, res) {
+  if (req.method === "GET") {
+    // Setup check you can open in a browser. It never shows the key itself.
+    const provider = process.env.READER || (process.env.GEMINI_API_KEY ? "gemini" : "claude");
+    const keySet = provider === "gemini" ? !!process.env.GEMINI_API_KEY : !!process.env.ANTHROPIC_API_KEY;
+    return res.status(200).json({ ok: true, provider, keySet });
+  }
   if (req.method !== "POST") return res.status(405).json({ error: "POST only" });
   const auth = String(req.headers.authorization || "");
   const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
