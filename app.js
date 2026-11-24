@@ -19,7 +19,7 @@ import { parseCompetences, compsToText, LEVEL1_PRESET, computeCompTerm, compTerm
 import { compSheetTab, compCardsTab } from "./compui.js";
 import { compScanTab, stopCompScan } from "./compscan.js";
 import { compFillTab } from "./compfill.js";
-
+import { micButton } from "./voice.js";
 const root = document.getElementById("app");
 const mount = (...nodes) => root.replaceChildren(...nodes.flat(Infinity).filter((x) => x != null && x !== false));
 // Put nodes (or arrays of nodes) into a container, replacing what was there.
