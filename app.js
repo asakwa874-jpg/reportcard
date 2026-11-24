@@ -757,7 +757,18 @@ function broadsheetTab(box) {
   const termSel = select(termOptions, S.term, (v) => { S.term = +v; broadsheetTab(box); });
   const pasteBox = el("div", {});
   const pasteBtn = el("button", { class: "btn alt sm", onclick: () => pasteBox.replaceChildren(...(pasteBox.childNodes.length ? [] : [buildPaste()])) }, "Paste marks");
-
+  const micBtn = (isTerm || blankMode) ? null : micButton({
+    getPupils: () => S.pupils,
+    onMarks: (pupil, nums) => {
+      const r = S.pupils.findIndex((p) => p.id === pupil.id);
+      nums.slice(0, subjects.length).forEach((n, i) => {
+        const inp = grid[r] && grid[r][i];
+        if (!inp) return;
+        inp.value = String(n);
+        inp.dispatchEvent(new Event("change"));
+      });
+    },
+  });
   function buildPaste() {
     const sub = select(subjects.map((s, i) => ({ value: i, label: s.name })), 0);
     const ta = el("textarea", { placeholder: "Ada Ngwa 15\nBola Tabe 12.5\n\nor one mark per line in class-list order:\n15\n12.5" });
