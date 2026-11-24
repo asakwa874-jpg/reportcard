@@ -1,6 +1,6 @@
 // Keeps the app shell available when the connection is weak. Firebase data is never cached here.
-const CACHE = "reportcard-shell-v10";
-const SHELL = ["./", "index.html", "styles.css", "app.js", "calc.js", "cards.js", "ui.js", "qr.js", "scan.js", "ocr.js", "fees.js", "best.js", "comp.js", "compui.js", "compscan.js", "compfill.js", "compbook.js", "firebase-config.js", "manifest.webmanifest"];
+const CACHE = "reportcard-shell-v11";
+const SHELL = ["./", "index.html", "styles.css", "app.js", "calc.js", "cards.js", "ui.js", "voice.js", "qr.js", "scan.js", "ocr.js", "fees.js", "best.js", "comp.js", "compui.js", "compscan.js", "compfill.js", "compbook.js", "firebase-config.js", "manifest.webmanifest"];
 
 self.addEventListener("install", (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
