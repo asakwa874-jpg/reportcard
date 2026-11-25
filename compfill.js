@@ -284,10 +284,19 @@ export function compFillTab(box, ctx) {
     voiceLoop();
   };
 
-  const dock = el("div", { class: "fdock noprint" }, disp, msg,
+  // The keys can be folded away so the pickers at the top (term, month, competence, evaluation) are reachable
+  const body = el("div", {},
     el("div", { class: "row" }, voiceBtn, langSel),
     el("p", { class: "muted" }, "Voice: tap a name to start from that pupil. Say the mark, then \"yes\". Also: skip, back, repeat, stop."),
     pad, finish);
+  const chg = el("button", { class: "btn alt sm", style: "width:100%;margin-bottom:6px" }, "⬆ Change month / competence / evaluation");
+  chg.onclick = () => {
+    const hide = body.style.display !== "none";
+    body.style.display = hide ? "none" : "";
+    chg.textContent = hide ? "⬇ Show the number keys" : "⬆ Change month / competence / evaluation";
+    if (hide) window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+  const dock = el("div", { class: "fdock noprint" }, chg, disp, msg, body);
 
   // Enter / digits from a real keyboard also work
   const onKey = (e) => {
