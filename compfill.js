@@ -148,12 +148,21 @@ export function compFillTab(box, ctx) {
   // One big key per possible mark (0 up to the evaluation's maximum): tap a number, it saves and moves to the next pupil
   let half = false;
   const halfBtn = k("+ .5", () => { half = !half; halfBtn.classList.toggle("go", half); halfBtn.textContent = half ? "+ .5 ✓" : "+ .5"; }, "alt");
-  const pick = async (n) => {
+  // The pupil is fixed at the moment of the tap and the screen moves on at once, so quick taps
+  // can never land on the wrong pupil while a save is still going on in the background.
+  const pick = (n) => {
     const v = n + (half ? 0.5 : 0);
     if (v > part().max) { msg.textContent = `${part().name} is from 0 to ${part().max}.`; return; }
-    buf = String(v);
-    const ok = await commit(false);
-    if (ok) { half = false; halfBtn.classList.remove("go"); halfBtn.textContent = "+ .5"; }
+    const i = idx;
+    const p = S.pupils[i];
+    const mk = key();
+    buf = "";
+    half = false; halfBtn.classList.remove("go"); halfBtn.textContent = "+ .5";
+    if (i < S.pupils.length - 1) idx = i + 1;
+    else toast("Last pupil done. Tap Finish to open the report cards.");
+    saveMark(p.id, mk, v).catch((e) => { toast(`NOT saved for ${p.name}: ${e.message}`); paint(); });
+    paint();
+    msg.textContent = `✔ ${i + 1}. ${p.name}: ${show(v)}`;
   };
   const maxMark = Math.floor(part().max);
   const cols = maxMark > 12 ? 5 : 4;
