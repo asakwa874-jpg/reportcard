@@ -16,12 +16,28 @@ const WORDS = {
   fifteen: 15, quinze: 15, sixteen: 16, seize: 16, seventeen: 17, "dix-sept": 17, eighteen: 18, "dix-huit": 18,
   nineteen: 19, "dix-neuf": 19, twenty: 20, vingt: 20,
 };
-const toNum = (t) => (/^\d+([.,]\d+)?$/.test(t) ? Number(t.replace(",", ".")) : t in WORDS ? WORDS[t] : null);
+// Words the phone often hears instead of a number, especially with African accents
+const SOUNDS = {
+  won: 1, wan: 1, juan: 1, to: 2, too: 2, tu: 2, tue: 2, tree: 3, free: 3, tri: 3, thee: 3, for: 4, fore: 4, fo: 4, faw: 4,
+  fife: 5, fiv: 5, fibe: 5, sick: 6, sicks: 6, sex: 6, sebel: 7, seben: 7, ate: 8, eat: 8, ait: 8, nein: 9, nain: 9,
+  night: 9, nye: 9, tin: 10, ton: 10, elevent: 11, twelf: 12, twelv: 12, tirteen: 13, thirten: 13, forteen: 14,
+  fourteen: 14, fiftin: 15, sixteen: 16, sixten: 16, seventin: 17, eighteen: 18, ateen: 18, nineten: 19, twenti: 20,
+};
+const toNum = (t, loose) => (/^\d+([.,]\d+)?$/.test(t) ? Number(t.replace(",", ".")) : t in WORDS ? WORDS[t] : loose && t in SOUNDS ? SOUNDS[t] : null);
 
 function parseSpoken(text) {
   const tok = String(text).toLowerCase().replace(/[!?;:]/g, " ").trim().split(/\s+/);
+  const loose = tok.length <= 4; // only guess odd sounds in short answers like "for" or "ate"
+  // digits said one by one: "one four" -> 14, "1 4" -> 14
+  if (tok.length === 2) {
+    const a = toNum(tok[0], loose), b = toNum(tok[1], loose);
+    if (a != null && b != null && a >= 1 && a <= 2 && b <= 9 && Number.isInteger(a) && Number.isInteger(b)) {
+      const v = a * 10 + b;
+      if (v <= 20) return v;
+    }
+  }
   for (let i = 0; i < tok.length; i++) {
-    let n = toNum(tok[i]);
+    let n = toNum(tok[i], loose);
     if (n == null) continue;
     if (n === 10 && ["sept", "huit", "neuf"].includes(tok[i + 1])) return 10 + WORDS[tok[i + 1]];
     if (["point", "virgule", "comma", "dot"].includes(tok[i + 1])) {
@@ -32,7 +48,11 @@ function parseSpoken(text) {
   }
   return null;
 }
-const firstNum = (alts) => { for (const a of alts) { const n = parseSpoken(a); if (n != null) return n; } return null; };
+// Look at every alternative the phone heard and prefer one that is a valid mark (0 to max)
+const firstNum = (alts, max = 20) => {
+  const all = alts.map(parseSpoken).filter((n) => n != null);
+  return all.find((n) => n <= max) ?? all[0] ?? null;
+};
 const hasWord = (alts, list) => alts.some((a) => a.toLowerCase().split(/[\s,.!?]+/).some((w) => list.includes(w)));
 const YES = ["yes", "yeah", "yep", "yup", "correct", "right", "ok", "okay", "sure", "oui", "exact", "d'accord"];
 const NO = ["no", "nope", "wrong", "incorrect", "non", "faux"];
@@ -53,7 +73,7 @@ export function compFillTab(box, ctx) {
   if (!TERM_MONTHS[S.term].includes(S.fillMonth)) S.fillMonth = TERM_MONTHS[S.term][0];
   if (!(S.fillComp < comps.length)) S.fillComp = 0;
   if (!(S.fillPart < comps[S.fillComp].parts.length)) S.fillPart = 0;
-  if (!S.voiceLang) S.voiceLang = S.cls.section === "Francophone" ? "fr-FR" : "en-US";
+  if (!S.voiceLang) S.voiceLang = localStorage.getItem("rc_voicelang") || (S.cls.section === "Francophone" ? "fr-FR" : "en-NG");
   let idx = 0;      // active pupil
   let buf = "";     // digits typed for the active pupil
   const cur = () => comps[S.fillComp];
@@ -136,14 +156,20 @@ export function compFillTab(box, ctx) {
   let rec = null;
   const fr = () => S.voiceLang.startsWith("fr");
   const voiceBtn = el("button", { class: "btn" }, "🎤 Start voice");
-  const langSel = select([{ value: "en-US", label: "Voice: English" }, { value: "fr-FR", label: "Voix : Français" }], S.voiceLang, (v) => { S.voiceLang = v; });
+  const langSel = select([
+    { value: "en-NG", label: "Voice: English (Africa)" },
+    { value: "en-GB", label: "Voice: English (UK)" },
+    { value: "en-US", label: "Voice: English (US)" },
+    { value: "en-ZA", label: "Voice: English (South Africa)" },
+    { value: "fr-FR", label: "Voix : Français" },
+  ], S.voiceLang, (v) => { S.voiceLang = v; localStorage.setItem("rc_voicelang", v); });
 
   const say = (text) => new Promise((res) => {
     if (!on) return res();
     msg.textContent = "🔊 " + text;
     window.speechSynthesis.cancel();
     const u = new SpeechSynthesisUtterance(text);
-    u.lang = S.voiceLang;
+    u.lang = fr() ? "fr-FR" : "en-GB";
     u.onend = res;
     u.onerror = res;
     window.speechSynthesis.speak(u);
@@ -156,7 +182,7 @@ export function compFillTab(box, ctx) {
     rec = r;
     r.lang = S.voiceLang;
     r.interimResults = false;
-    r.maxAlternatives = 3;
+    r.maxAlternatives = 5;
     r.onresult = (e) => { got = Array.from(e.results[0]).map((a) => a.transcript.toLowerCase().trim()); };
     r.onerror = () => {};
     r.onend = () => { if (rec === r) rec = null; res(got); };
@@ -173,6 +199,7 @@ export function compFillTab(box, ctx) {
   }
 
   async function voiceLoop() {
+    let fails = 0;
     while (on && box.isConnected) {
       paint();
       await say(fr() ? `Numéro ${idx + 1}` : `Number ${idx + 1}`);
@@ -188,8 +215,13 @@ export function compFillTab(box, ctx) {
         await say(fr() ? "Classe terminée" : "Class finished");
         break;
       }
-      let v = firstNum(alts);
-      if (v == null) { await say(fr() ? "Je n'ai pas compris" : "Sorry, I did not understand"); continue; }
+      let v = firstNum(alts, part().max);
+      if (v == null) {
+        fails++;
+        await say(fr() ? (fails >= 2 ? "Dites les chiffres un par un" : "Je n'ai pas compris, répétez") : (fails >= 2 ? "Say the digits one by one, like one four" : "Sorry, say the mark again"));
+        continue;
+      }
+      fails = 0;
 
       // ask to confirm until the teacher says yes or no
       let result = "";
@@ -203,7 +235,7 @@ export function compFillTab(box, ctx) {
         if (c2 === "stop") { result = "stop"; break; }
         if (hasWord(a2, YES)) { result = "yes"; break; }
         if (hasWord(a2, NO)) { result = "again"; break; }
-        const n2 = firstNum(a2);
+        const n2 = firstNum(a2, part().max);
         if (n2 != null) v = n2; // teacher said a different mark: confirm that one instead
       }
       if (!on || result === "stop") break;
@@ -250,3 +282,4 @@ export function compFillTab(box, ctx) {
   put(box, picker, el("div", { class: "card" }, info, list), dock);
   paint();
 }
+
