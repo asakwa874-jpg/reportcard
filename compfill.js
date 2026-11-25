@@ -1,9 +1,51 @@
 // "Fill class": pick month, competence and evaluation, then every pupil's name is listed.
 // Tap a number pad, press Next, and it moves to the next pupil. Finish opens the report cards.
+// Voice mode: the app says the register number, the teacher says the mark, the app asks
+// "Correct?", the teacher says "yes". It keeps going until the teacher says "stop" or the class ends.
 import { el, select, toast } from "./ui.js";
 import { TERM_MONTHS, compKey } from "./comp.js";
 
+/* ---------- voice helpers ---------- */
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+let stopVoice = null; // stops a running voice session when the screen is redrawn or left
+
+const WORDS = {
+  zero: 0, "zéro": 0, one: 1, un: 1, une: 1, two: 2, deux: 2, three: 3, trois: 3, four: 4, quatre: 4,
+  five: 5, cinq: 5, six: 6, seven: 7, sept: 7, eight: 8, huit: 8, nine: 9, neuf: 9, ten: 10, dix: 10,
+  eleven: 11, onze: 11, twelve: 12, douze: 12, thirteen: 13, treize: 13, fourteen: 14, quatorze: 14,
+  fifteen: 15, quinze: 15, sixteen: 16, seize: 16, seventeen: 17, "dix-sept": 17, eighteen: 18, "dix-huit": 18,
+  nineteen: 19, "dix-neuf": 19, twenty: 20, vingt: 20,
+};
+const toNum = (t) => (/^\d+([.,]\d+)?$/.test(t) ? Number(t.replace(",", ".")) : t in WORDS ? WORDS[t] : null);
+
+function parseSpoken(text) {
+  const tok = String(text).toLowerCase().replace(/[!?;:]/g, " ").trim().split(/\s+/);
+  for (let i = 0; i < tok.length; i++) {
+    let n = toNum(tok[i]);
+    if (n == null) continue;
+    if (n === 10 && ["sept", "huit", "neuf"].includes(tok[i + 1])) return 10 + WORDS[tok[i + 1]];
+    if (["point", "virgule", "comma", "dot"].includes(tok[i + 1])) {
+      const d = toNum(tok[i + 2] || "");
+      if (d != null && d < 10) n += d / 10;
+    } else if (/(and a half|et demi)/.test(tok.slice(i + 1).join(" "))) n += 0.5;
+    return Math.round(n * 100) / 100;
+  }
+  return null;
+}
+const firstNum = (alts) => { for (const a of alts) { const n = parseSpoken(a); if (n != null) return n; } return null; };
+const hasWord = (alts, list) => alts.some((a) => a.toLowerCase().split(/[\s,.!?]+/).some((w) => list.includes(w)));
+const YES = ["yes", "yeah", "yep", "yup", "correct", "right", "ok", "okay", "sure", "oui", "exact", "d'accord"];
+const NO = ["no", "nope", "wrong", "incorrect", "non", "faux"];
+function command(alts) {
+  if (hasWord(alts, ["stop", "stopped", "arrête", "arrete", "arrêt", "arret"])) return "stop";
+  if (hasWord(alts, ["skip", "absent", "passer", "next"])) return "skip";
+  if (hasWord(alts, ["back", "previous", "retour", "précédent"])) return "back";
+  if (hasWord(alts, ["repeat", "again", "répète", "repete"])) return "repeat";
+  return null;
+}
+
 export function compFillTab(box, ctx) {
+  if (stopVoice) stopVoice();
   const { S, saveMark, put, termOptions, TERM_NAMES, goCards } = ctx;
   const comps = S.cls.comps || [];
   if (!S.pupils.length) return put(box, el("div", { class: "card" }, el("p", {}, "Add your pupils first (Pupils tab).")));
@@ -11,6 +53,7 @@ export function compFillTab(box, ctx) {
   if (!TERM_MONTHS[S.term].includes(S.fillMonth)) S.fillMonth = TERM_MONTHS[S.term][0];
   if (!(S.fillComp < comps.length)) S.fillComp = 0;
   if (!(S.fillPart < comps[S.fillComp].parts.length)) S.fillPart = 0;
+  if (!S.voiceLang) S.voiceLang = S.cls.section === "Francophone" ? "fr-FR" : "en-US";
   let idx = 0;      // active pupil
   let buf = "";     // digits typed for the active pupil
   const cur = () => comps[S.fillComp];
@@ -87,7 +130,111 @@ export function compFillTab(box, ctx) {
     k(".", () => press(".")), k("0", () => press("0")), k("⌫", () => press("back")),
     k("Clear", clearMark, "alt"), k("Skip", () => commit(true), "alt"), k("Next ▶", () => commit(false), "go"));
   const finish = el("button", { class: "btn alt", onclick: () => goCards && goCards() }, "Finish: open report cards");
-  const dock = el("div", { class: "fdock noprint" }, disp, msg, pad, finish);
+
+  /* ---------- voice mode ---------- */
+  let on = false;
+  let rec = null;
+  const fr = () => S.voiceLang.startsWith("fr");
+  const voiceBtn = el("button", { class: "btn" }, "🎤 Start voice");
+  const langSel = select([{ value: "en-US", label: "Voice: English" }, { value: "fr-FR", label: "Voix : Français" }], S.voiceLang, (v) => { S.voiceLang = v; });
+
+  const say = (text) => new Promise((res) => {
+    if (!on) return res();
+    msg.textContent = "🔊 " + text;
+    window.speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang = S.voiceLang;
+    u.onend = res;
+    u.onerror = res;
+    window.speechSynthesis.speak(u);
+  });
+  const listen = () => new Promise((res) => {
+    if (!on) return res(null);
+    msg.textContent = fr() ? "🎤 J'écoute…" : "🎤 Listening…";
+    let got = null;
+    const r = new SR();
+    rec = r;
+    r.lang = S.voiceLang;
+    r.interimResults = false;
+    r.maxAlternatives = 3;
+    r.onresult = (e) => { got = Array.from(e.results[0]).map((a) => a.transcript.toLowerCase().trim()); };
+    r.onerror = () => {};
+    r.onend = () => { if (rec === r) rec = null; res(got); };
+    try { r.start(); } catch (e) { res(null); }
+  });
+
+  function endVoice() {
+    on = false;
+    stopVoice = null;
+    try { window.speechSynthesis.cancel(); } catch (e) { /* ignore */ }
+    if (rec) { try { rec.abort(); } catch (e) { /* ignore */ } rec = null; }
+    voiceBtn.textContent = "🎤 Start voice";
+    voiceBtn.classList.remove("bad");
+  }
+
+  async function voiceLoop() {
+    while (on && box.isConnected) {
+      paint();
+      await say(fr() ? `Numéro ${idx + 1}` : `Number ${idx + 1}`);
+      const alts = await listen();
+      if (!on) break;
+      if (!alts) continue; // heard nothing: say the number again
+      const cmd = command(alts);
+      if (cmd === "stop") break;
+      if (cmd === "repeat") continue;
+      if (cmd === "back") { if (idx > 0) idx--; continue; }
+      if (cmd === "skip") {
+        if (idx < S.pupils.length - 1) { idx++; continue; }
+        await say(fr() ? "Classe terminée" : "Class finished");
+        break;
+      }
+      let v = firstNum(alts);
+      if (v == null) { await say(fr() ? "Je n'ai pas compris" : "Sorry, I did not understand"); continue; }
+
+      // ask to confirm until the teacher says yes or no
+      let result = "";
+      while (on && result === "") {
+        if (v > part().max) { await say(fr() ? `Plus de ${part().max}` : `Above ${part().max}`); result = "again"; break; }
+        await say(fr() ? `${v}. Correct ?` : `${v}. Correct?`);
+        const a2 = await listen();
+        if (!on) return;
+        if (!a2) continue;
+        const c2 = command(a2);
+        if (c2 === "stop") { result = "stop"; break; }
+        if (hasWord(a2, YES)) { result = "yes"; break; }
+        if (hasWord(a2, NO)) { result = "again"; break; }
+        const n2 = firstNum(a2);
+        if (n2 != null) v = n2; // teacher said a different mark: confirm that one instead
+      }
+      if (!on || result === "stop") break;
+      if (result === "again") continue;
+
+      try { await saveMark(S.pupils[idx].id, key(), v); }
+      catch (e) { toast("Not saved: " + e.message); break; }
+      paint();
+      if (idx < S.pupils.length - 1) { idx++; }
+      else { await say(fr() ? "Classe terminée" : "Class finished"); break; }
+    }
+    endVoice();
+    msg.textContent = "";
+    paint();
+  }
+
+  voiceBtn.onclick = () => {
+    if (on) { endVoice(); msg.textContent = ""; return; }
+    if (!SR || !window.speechSynthesis) return toast("Voice needs Chrome on your phone.");
+    on = true;
+    stopVoice = endVoice;
+    buf = "";
+    voiceBtn.textContent = "⏹ Stop voice";
+    voiceBtn.classList.add("bad");
+    voiceLoop();
+  };
+
+  const dock = el("div", { class: "fdock noprint" }, disp, msg,
+    el("div", { class: "row" }, voiceBtn, langSel),
+    el("p", { class: "muted" }, "Voice: tap a name to start from that pupil. Say the mark, then \"yes\". Also: skip, back, repeat, stop."),
+    pad, finish);
 
   // Enter / digits from a real keyboard also work
   const onKey = (e) => {
@@ -103,3 +250,4 @@ export function compFillTab(box, ctx) {
   put(box, picker, el("div", { class: "card" }, info, list), dock);
   paint();
 }
+
