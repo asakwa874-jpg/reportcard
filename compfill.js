@@ -250,4 +250,3 @@ export function compFillTab(box, ctx) {
   put(box, picker, el("div", { class: "card" }, info, list), dock);
   paint();
 }
-
