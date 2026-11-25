@@ -145,10 +145,22 @@ export function compFillTab(box, ctx) {
     catch (e) { toast("Not saved: " + e.message); }
   };
   const k = (label, fn, cls = "") => el("button", { class: "fkey " + cls, onclick: fn }, label);
-  const pad = el("div", { class: "fpad" },
-    ["1", "2", "3", "4", "5", "6", "7", "8", "9"].map((d) => k(d, () => press(d))),
-    k(".", () => press(".")), k("0", () => press("0")), k("⌫", () => press("back")),
-    k("Clear", clearMark, "alt"), k("Skip", () => commit(true), "alt"), k("Next ▶", () => commit(false), "go"));
+  // One big key per possible mark (0 up to the evaluation's maximum): tap a number, it saves and moves to the next pupil
+  let half = false;
+  const halfBtn = k("+ .5", () => { half = !half; halfBtn.classList.toggle("go", half); halfBtn.textContent = half ? "+ .5 ✓" : "+ .5"; }, "alt");
+  const pick = async (n) => {
+    const v = n + (half ? 0.5 : 0);
+    if (v > part().max) { msg.textContent = `${part().name} is from 0 to ${part().max}.`; return; }
+    buf = String(v);
+    const ok = await commit(false);
+    if (ok) { half = false; halfBtn.classList.remove("go"); halfBtn.textContent = "+ .5"; }
+  };
+  const maxMark = Math.floor(part().max);
+  const cols = maxMark > 12 ? 5 : 4;
+  const gridStyle = el("style", {}, `.fnums{display:grid;grid-template-columns:repeat(${cols},1fr);gap:8px;margin:8px 0}.fnums .fkey{min-height:56px;font-size:24px;font-weight:700}.fctl{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}.fctl .fkey{min-height:48px;font-size:16px}`);
+  const nums = el("div", { class: "fnums" }, Array.from({ length: maxMark + 1 }, (_, n) => k(String(n), () => pick(n))));
+  const pad = el("div", {}, gridStyle, nums,
+    el("div", { class: "fctl" }, halfBtn, k("Clear", clearMark, "alt"), k("Skip", () => commit(true), "alt"), k("⌫", () => press("back"), "alt")));
   const finish = el("button", { class: "btn alt", onclick: () => goCards && goCards() }, "Finish: open report cards");
 
   /* ---------- voice mode ---------- */
